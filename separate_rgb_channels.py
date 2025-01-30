@@ -1,6 +1,7 @@
 import os
+import shutil
 import numpy as np
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 def process_and_separate_image(image_path, output_folder):
     """
@@ -121,7 +122,6 @@ def process_and_separate_image(image_path, output_folder):
         b_img.save(os.path.join(output_folder, f"{base_name}_B_16bit.png"))
 
         print(f"  -> Saved 16-bit R/G/B channels for {file_name} in '{output_folder}'.")
-
     else:
         # Convert to standard 8-bit RGB
         img_rgb = img.convert("RGB")
@@ -138,36 +138,55 @@ def process_and_separate_image(image_path, output_folder):
 
 def process_folder(folder_path):
     """
-    Process all valid image files in the given folder.
-    For each file, call process_and_separate_image.
-    Grayscale images will raise a ValueError (handled here).
+    For each valid image file in folder_path:
+      1) Create a subfolder named after the file’s base name + file extension.
+      2) Copy the original image into that subfolder.
+      3) Process the image to separate channels into that same subfolder.
+      4) If it's grayscale or corrupted, catch exceptions and print the error (skips channel separation).
     """
     valid_extensions = {'.jpg', '.jpeg', '.png', '.tif', '.tiff'}
 
-    # We'll store all channel outputs in a subfolder named "Channels"
-    output_folder = os.path.join(folder_path, "Channels")
-    os.makedirs(output_folder, exist_ok=True)
-
-    # Iterate over files in the folder
     for fname in os.listdir(folder_path):
         ext = os.path.splitext(fname)[1].lower()
         if ext in valid_extensions:
+            # Construct full path to the image
             full_path = os.path.join(folder_path, fname)
-            try:
-                process_and_separate_image(full_path, output_folder)
-            except ValueError as e:
-                # For grayscale images or other issues
-                print(e)
+            base_name = os.path.splitext(fname)[0]
 
-def main():
-    # Prompt user for the folder path
-    folder_path = input("Enter the path to the folder containing images: ").strip()
-    if not os.path.isdir(folder_path):
-        print("Invalid folder path.")
-        return
-    
-    process_folder(folder_path)
-    print("All done.")
+            # Create a unique subfolder by appending the extension name (without the dot),
+            # to avoid collisions if there are multiple files named 'image.jpg' and 'image.png'.
+            # e.g. "image.jpg" -> subfolder "image_jpg"
+            subfolder_name = f"{base_name}_{ext[1:]}"  # remove '.' from extension
+            output_subfolder = os.path.join(folder_path, subfolder_name)
+            os.makedirs(output_subfolder, exist_ok=True)
+
+            # Copy the original file into the subfolder
+            dest_file_path = os.path.join(output_subfolder, fname)
+            try:
+                shutil.copy2(full_path, dest_file_path)
+            except PermissionError as e:
+                print(f"Permission error copying '{fname}': {e}")
+                continue
+            except OSError as e:
+                print(f"OS error copying '{fname}': {e}")
+                continue
+
+            # Process and separate channels into that subfolder
+            try:
+                process_and_separate_image(full_path, output_subfolder)
+            except ValueError as e:
+                # For grayscale images or other explicit ValueErrors
+                print(e)
+            except (OSError, UnidentifiedImageError) as e:
+                # For corrupted or unidentifiable files
+                print(f"Could not open or process '{fname}': {e}")
 
 if __name__ == "__main__":
-    main()
+    # Specify your folder path directly here:
+    folder_path = r"/path/to/your/image/folder"
+    
+    if not os.path.isdir(folder_path):
+        print(f"Invalid folder path: {folder_path}")
+    else:
+        process_folder(folder_path)
+        print("All done.")
